@@ -45,6 +45,7 @@ class AudioSegment:
     loop: bool = False          # repeat to fill the video (music, footage sound)
     seek: float = 0.0           # -ss into the file (footage sound follows the picture)
     fade_out: float = 0.0
+    src_duration: float = 0.0   # length of the file, to make the loop count finite
 
 
 @dataclass
@@ -150,10 +151,12 @@ def _footage_and_music(s: ProjectSettings, index: int, total: float, rng: random
         raise RenderError(str(exc)) from exc
     audio: list[AudioSegment] = []
     if bg.path and bg.has_audio and s.background_audio_volume > 0:
-        audio.append(AudioSegment(bg.path, 0.0, s.background_audio_volume, loop=bool(bg.loops), seek=bg.start, fade_out=1.0))
+        audio.append(AudioSegment(bg.path, 0.0, s.background_audio_volume, loop=bool(bg.loops), seek=bg.start,
+                                  fade_out=1.0, src_duration=bg.src_duration))
     music = bgmod.choose_file(s.music_path, index, "random", bgmod.AUDIO_EXTENSIONS, rng)
     if music and s.music_volume > 0:
-        audio.append(AudioSegment(music, 0.0, s.music_volume, loop=True, fade_out=1.5))
+        dur = ff.media_duration(music) or 0.0
+        audio.append(AudioSegment(music, 0.0, s.music_volume, loop=dur < total, fade_out=1.5, src_duration=dur))
     return bg, audio
 
 
@@ -266,9 +269,10 @@ def encoder_command(plan: Plan, out_path: str) -> list[str]:
     chains: list[str] = []
     for i, seg in enumerate(plan.audio, start=1):
         if seg.loop:
-            # Loop, but stop reading at the video's length: an unbounded loop
-            # makes newer FFmpeg builds wait forever for the stream to end.
-            cmd += ["-stream_loop", "-1", "-t", f"{plan.total + 0.5:.3f}"]
+            # A finite loop count plus an input-side -t: an unbounded loop can
+            # make newer FFmpeg builds wait forever for the stream to end.
+            loops = int(plan.total // seg.src_duration) + 2 if seg.src_duration > 0 else 1000
+            cmd += ["-stream_loop", str(loops), "-t", f"{plan.total + 0.5:.3f}"]
         if seg.seek > 0:
             cmd += ["-ss", f"{seg.seek:.3f}"]
         cmd += ["-i", seg.path]
@@ -329,7 +333,11 @@ def render(plan: Plan, out_path: str, log=None, progress=None, cancelled=None) -
                 if progress and (i % 3 == 0 or i == total_frames - 1):
                     progress(i + 1, total_frames)
             proc.stdin.close()
-            rc = proc.wait()
+            try:
+                rc = proc.wait(timeout=max(120.0, plan.total * 2))
+            except subprocess.TimeoutExpired as exc:
+                _kill(proc)
+                raise RenderError("ffmpeg did not finish after the last frame: " + _stderr_tail(err_file, proc)) from exc
     except bgmod.BackgroundError as exc:
         _kill(proc)
         raise RenderError(str(exc)) from exc

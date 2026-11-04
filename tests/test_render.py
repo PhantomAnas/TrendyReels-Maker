@@ -54,12 +54,13 @@ def test_encoder_command_shapes():
     plan = render.plan_preview(STORY, settings())
     cmd = render.encoder_command(plan, "out.mp4")
     assert "anullsrc" in " ".join(cmd) and cmd[-1] == "out.mp4"
-    plan.audio = [render.AudioSegment("v.wav", 0.5), render.AudioSegment("m.mp3", 0, 0.2, loop=True, fade_out=1.0)]
+    plan.audio = [render.AudioSegment("v.wav", 0.5),
+                  render.AudioSegment("m.mp3", 0, 0.2, loop=True, fade_out=1.0, src_duration=plan.total / 3)]
     cmd = render.encoder_command(plan, "out.mp4")
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=500|500" in graph and "amix=inputs=2" in graph and "afade=t=out" in graph
     i = cmd.index("m.mp3")
-    assert cmd[i - 5:i] == ["-stream_loop", "-1", "-t", f"{plan.total + 0.5:.3f}", "-i"]   # bounded loop
+    assert cmd[i - 5:i] == ["-stream_loop", "5", "-t", f"{plan.total + 0.5:.3f}", "-i"]   # finite, bounded loop
 
 
 @needs_ffmpeg
@@ -107,6 +108,7 @@ def test_render_with_footage_music_and_cancel(tmp_path, clip, clips_folder):
     plan = render.build_plan(STORY, s, str(tmp_path / "work"), index=0)
     assert plan.background.path.endswith("a.mp4") and plan.background.loops >= 1
     assert len(plan.audio) == 4                       # title, body, footage sound, music
+    assert all(seg.src_duration > 0 for seg in plan.audio[2:]) and plan.audio[3].loop
     out = str(tmp_path / "out.mp4")
     render.render(plan, out)
     assert ff.video_info(out)[3]
