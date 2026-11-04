@@ -15,11 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          github-token: ${{ github.token }}
+      - run: choco install ffmpeg -y --no-progress
+      - run: ffmpeg -version
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: python -m pytest -v --timeout=180
       - run: pyinstaller trendyreels.spec
       - name: Smoke-run the exe (CLI render with the silent voice)
         shell: pwsh

@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.0"]
-dev = ["pytest>=8", "pyinstaller>=6"]
+dev = ["pytest>=8", "pytest-timeout>=2", "pyinstaller>=6"]
 
 [project.urls]
 Homepage = "https://github.com/PhantomAnas/TrendyReels-Maker"
