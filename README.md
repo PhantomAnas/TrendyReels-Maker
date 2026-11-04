@@ -36,7 +36,7 @@ pip install -e .
 trendyreels
 ```
 
-Or skip the install and run `python launcher.py` from the checkout (the dependencies still need to be installed: `pip install PySide6-Essentials numpy Pillow platformdirs edge-tts`).
+Or skip the install and run `python launcher.py` from the checkout (the dependencies still need to be installed: `pip install -r requirements.txt`).
 
 Optional: `pip install faster-whisper` for word-accurate captions on your own recordings (the model downloads on first use).
 
