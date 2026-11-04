@@ -148,12 +148,11 @@ class FrameReader:
 
     def close(self) -> None:
         if self.proc is not None:
+            ff.kill_tree(self.proc)
             try:
                 if self.proc.stdout:
                     self.proc.stdout.close()
-                self.proc.kill()
-                self.proc.wait(timeout=5)
-            except (OSError, subprocess.SubprocessError):
+            except OSError:
                 pass
             self.proc = None
 

@@ -96,6 +96,27 @@ def _quote(a: str) -> str:
     return f'"{a}"' if " " in a else a
 
 
+def kill_tree(proc: subprocess.Popen) -> None:
+    """Stop an ffmpeg we started, including children.  Some installs (the
+    Chocolatey shim, wrapper scripts) launch the real ffmpeg as a child
+    process that would otherwise keep writing after the parent is killed."""
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=10, **_no_window())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.SubprocessError:
+        pass
+
+
 def probe(path: str) -> dict | None:
     """ffprobe-style dict: {"format": {"duration"}, "streams": [{codec_type, width, height, r_frame_rate}]}.
 

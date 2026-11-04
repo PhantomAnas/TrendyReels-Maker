@@ -363,15 +363,11 @@ def _stderr_tail(err_file, proc) -> str:
 
 
 def _kill(proc: subprocess.Popen) -> None:
+    ff.kill_tree(proc)
     try:
         if proc.stdin:
             proc.stdin.close()
     except OSError:
-        pass
-    try:
-        proc.kill()
-        proc.wait(timeout=5)
-    except (OSError, subprocess.SubprocessError):
         pass
 
 
