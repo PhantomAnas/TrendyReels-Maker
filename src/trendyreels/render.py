@@ -266,7 +266,9 @@ def encoder_command(plan: Plan, out_path: str) -> list[str]:
     chains: list[str] = []
     for i, seg in enumerate(plan.audio, start=1):
         if seg.loop:
-            cmd += ["-stream_loop", "-1"]
+            # Loop, but stop reading at the video's length: an unbounded loop
+            # makes newer FFmpeg builds wait forever for the stream to end.
+            cmd += ["-stream_loop", "-1", "-t", f"{plan.total + 0.5:.3f}"]
         if seg.seek > 0:
             cmd += ["-ss", f"{seg.seek:.3f}"]
         cmd += ["-i", seg.path]

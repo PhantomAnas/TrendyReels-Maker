@@ -58,7 +58,8 @@ def test_encoder_command_shapes():
     cmd = render.encoder_command(plan, "out.mp4")
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=500|500" in graph and "amix=inputs=2" in graph and "afade=t=out" in graph
-    assert cmd[cmd.index("-i", cmd.index("pipe:0")) - 2:cmd.index("-i", cmd.index("pipe:0"))] == ["-stream_loop", "-1"] or "-stream_loop" in cmd
+    i = cmd.index("m.mp3")
+    assert cmd[i - 5:i] == ["-stream_loop", "-1", "-t", f"{plan.total + 0.5:.3f}", "-i"]   # bounded loop
 
 
 @needs_ffmpeg
