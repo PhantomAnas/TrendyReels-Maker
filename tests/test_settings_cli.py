@@ -58,10 +58,17 @@ def test_cli_story_sources(tmp_path):
     assert cli.stories_from_args(ProjectSettings(), p.parse_args([])) == []
 
 
-def test_cli_errors_and_check(capsys):
+def test_cli_errors_and_check(capsys, monkeypatch):
     assert cli.main(["--no-saved-settings"]) == 2
     rc = cli.main(["--check"])
     out = capsys.readouterr().out.lower()
     assert ("ffmpeg" in out) and rc in (0, 1)
+    # stay offline: the voice list falls back to the built-in one when the fetch fails
+    from trendyreels.tts import TTSError
+
+    def offline(refresh=False):
+        raise TTSError("offline")
+
+    monkeypatch.setattr(cli, "list_edge_voices", offline)
     assert cli.main(["--list-voices"]) == 0
     assert "Neural" in capsys.readouterr().out

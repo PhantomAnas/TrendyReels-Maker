@@ -111,10 +111,13 @@ def list_edge_voices(refresh: bool = False) -> list[tuple[str, str]]:
         import edge_tts
     except Exception as exc:  # noqa: BLE001
         raise TTSError("edge-tts is not installed: pip install edge-tts") from exc
+    async def fetch():
+        return await asyncio.wait_for(edge_tts.list_voices(), timeout=30)
+
     try:
-        voices = asyncio.run(edge_tts.list_voices())
+        voices = asyncio.run(fetch())
     except Exception as exc:  # noqa: BLE001
-        raise TTSError(f"could not fetch the Edge voice list: {exc}") from exc
+        raise TTSError(f"could not fetch the Edge voice list: {type(exc).__name__}: {exc}") from exc
     out = []
     for v in voices:
         short = v.get("ShortName", "")
