@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trendyreels-maker"
-version = "0.1.0"
+version = "0.1.1"
 description = "Turn a story into a captioned vertical short: AI voice, word-synced pop captions, a title card and your own background footage."
 readme = "README.md"
 requires-python = ">=3.10"
