@@ -261,22 +261,28 @@ class FrameComposer:
 
 # ------------------------------------------------------------------ encoding
 
-def encoder_command(plan: Plan, out_path: str) -> list[str]:
-    s = plan.settings
-    w, h = s.even_size
-    cmd = [ff.require_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
-           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(s.fps), "-i", "pipe:0"]
+def mix_command(plan: Plan, out_wav: str) -> list[str]:
+    """Mix the voice, footage sound and music into one stereo wav of exactly
+    `plan.total` seconds.  Done as its own FFmpeg run, with no pipes, because
+    several audio inputs next to the piped video deadlock FFmpeg 7/8 now and
+    then (the scheduler throttles the slow video input and never resumes)."""
+    cmd = [ff.require_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y"]
     chains: list[str] = []
-    for i, seg in enumerate(plan.audio, start=1):
-        if seg.loop:
-            # A finite loop count plus an input-side -t: an unbounded loop can
-            # make newer FFmpeg builds wait forever for the stream to end.
-            loops = int(plan.total // seg.src_duration) + 2 if seg.src_duration > 0 else 1000
-            cmd += ["-stream_loop", str(loops), "-t", f"{plan.total + 0.5:.3f}"]
+    for i, seg in enumerate(plan.audio):
         if seg.seek > 0:
             cmd += ["-ss", f"{seg.seek:.3f}"]
         cmd += ["-i", seg.path]
         chain = [f"[{i}:a]aresample=48000", "aformat=channel_layouts=stereo"]
+        if seg.loop:
+            # Repeat inside the filter graph rather than with -stream_loop: a
+            # looped demuxer next to the piped video deadlocks FFmpeg 7/8 now
+            # and then (the pipe stalls after a few frames, ffmpeg never ends).
+            if seg.src_duration > 0:
+                loops = int(plan.total // seg.src_duration) + 2
+                samples = int(seg.src_duration * 48000) + 48000
+            else:
+                loops, samples = -1, 2147483647
+            chain.append(f"aloop=loop={loops}:size={samples}")
         if abs(seg.volume - 1.0) > 1e-3:
             chain.append(f"volume={seg.volume:.3f}")
         if seg.offset > 0:
@@ -289,17 +295,29 @@ def encoder_command(plan: Plan, out_path: str) -> list[str]:
     n = len(plan.audio)
     if n == 0:
         cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
-        graph = f"[1:a]atrim=0:{plan.total:.3f}[aout]"
+        graph = f"[0:a]atrim=0:{plan.total:.3f}[aout]"
     elif n == 1:
-        graph = chains[0].replace("[a1]", "") + f",apad,atrim=0:{plan.total:.3f}[aout]"
+        graph = chains[0].replace("[a0]", "") + f",apad=whole_dur={plan.total:.3f}[aout]"
     else:
-        graph = ";".join(chains) + ";" + "".join(f"[a{i}]" for i in range(1, n + 1)) + \
-            f"amix=inputs={n}:duration=longest:normalize=0,apad,atrim=0:{plan.total:.3f}[aout]"
-    cmd += ["-filter_complex", graph, "-map", "0:v", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", s.preset, "-crf", str(s.crf), "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
-            "-t", f"{plan.total:.3f}", out_path]
+        # Bounded padding on purpose: a plain `apad` (infinite) followed by
+        # atrim hangs FFmpeg 7/8 about half the time.
+        graph = ";".join(chains) + ";" + "".join(f"[a{i}]" for i in range(n)) + \
+            f"amix=inputs={n}:duration=longest:normalize=0,apad=whole_dur={plan.total:.3f}[aout]"
+    cmd += ["-filter_complex", graph, "-map", "[aout]", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
+            "-t", f"{plan.total:.3f}", out_wav]
     return cmd
+
+
+def encoder_command(plan: Plan, mixed_wav: str, out_path: str) -> list[str]:
+    """Encode piped RGB frames plus the mixed wav to H.264 + AAC."""
+    s = plan.settings
+    w, h = s.even_size
+    return [ff.require_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(s.fps), "-i", "pipe:0",
+            "-i", mixed_wav, "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", s.preset, "-crf", str(s.crf), "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+            "-t", f"{plan.total:.3f}", out_path]
 
 
 def render(plan: Plan, out_path: str, log=None, progress=None, cancelled=None) -> str:
@@ -309,7 +327,18 @@ def render(plan: Plan, out_path: str, log=None, progress=None, cancelled=None) -
     composer = FrameComposer(plan)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     tmp_out = os.path.join(os.path.dirname(os.path.abspath(out_path)), "." + os.path.basename(out_path) + ".part.mp4")
-    cmd = encoder_command(plan, tmp_out)
+    mixed = tmp_out + ".audio.wav"
+    if cancelled and cancelled():
+        raise RenderCancelled()
+    mix = mix_command(plan, mixed)
+    if log:
+        log("ffmpeg " + " ".join(f'"{a}"' if " " in a else a for a in mix[1:]))
+    try:
+        ff.run(mix[1:].copy()[mix[1:].index("-y") + 1:], timeout=max(120.0, plan.total * 4))
+    except ff.FFmpegError as exc:
+        _remove(mixed)
+        raise RenderError(f"audio mix failed: {exc}") from exc
+    cmd = encoder_command(plan, mixed, tmp_out)
     if log:
         log("ffmpeg " + " ".join(f'"{a}"' if " " in a else a for a in cmd[1:]))
     err_file = tempfile.TemporaryFile()
@@ -317,6 +346,7 @@ def render(plan: Plan, out_path: str, log=None, progress=None, cancelled=None) -
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err_file,
                                 bufsize=w * h * 3 * 2, **ff._no_window())
     except OSError as exc:
+        _remove(mixed)
         raise RenderError(f"could not start ffmpeg: {exc}") from exc
     total_frames = max(1, int(round(plan.total * s.fps)))
     try:
@@ -334,21 +364,20 @@ def render(plan: Plan, out_path: str, log=None, progress=None, cancelled=None) -
                     progress(i + 1, total_frames)
             proc.stdin.close()
             try:
-                rc = proc.wait(timeout=max(120.0, plan.total * 2))
+                rc = proc.wait(timeout=float(os.environ.get("TRENDYREELS_ENCODE_TIMEOUT", 0) or max(120.0, plan.total * 2)))
             except subprocess.TimeoutExpired as exc:
                 _kill(proc)
                 raise RenderError("ffmpeg did not finish after the last frame: " + _stderr_tail(err_file, proc)) from exc
     except bgmod.BackgroundError as exc:
         _kill(proc)
+        _remove(mixed)
         raise RenderError(str(exc)) from exc
-    except RenderCancelled:
-        _kill(proc)
-        _remove(tmp_out)
-        raise
     except BaseException:
         _kill(proc)
         _remove(tmp_out)
+        _remove(mixed)
         raise
+    _remove(mixed)
     if rc != 0:
         tail = _stderr_tail(err_file, proc)
         _remove(tmp_out)

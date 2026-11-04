@@ -50,17 +50,20 @@ def test_frame_composer_draws_card_then_captions():
     assert small.frame_at(t, gradient_frame(90, 160, (0, 0, 0))).shape == (160, 90, 3)
 
 
-def test_encoder_command_shapes():
+def test_mix_and_encoder_command_shapes():
     plan = render.plan_preview(STORY, settings())
-    cmd = render.encoder_command(plan, "out.mp4")
-    assert "anullsrc" in " ".join(cmd) and cmd[-1] == "out.mp4"
+    cmd = render.mix_command(plan, "mix.wav")
+    assert "anullsrc" in " ".join(cmd) and cmd[-1] == "mix.wav"
     plan.audio = [render.AudioSegment("v.wav", 0.5),
                   render.AudioSegment("m.mp3", 0, 0.2, loop=True, fade_out=1.0, src_duration=plan.total / 3)]
-    cmd = render.encoder_command(plan, "out.mp4")
+    cmd = render.mix_command(plan, "mix.wav")
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "adelay=500|500" in graph and "amix=inputs=2" in graph and "afade=t=out" in graph
-    i = cmd.index("m.mp3")
-    assert cmd[i - 5:i] == ["-stream_loop", "5", "-t", f"{plan.total + 0.5:.3f}", "-i"]   # finite, bounded loop
+    assert "-stream_loop" not in cmd                          # looping happens in the filter graph
+    assert f"aloop=loop=5:size={int(plan.total / 3 * 48000) + 48000}" in graph
+    enc = render.encoder_command(plan, "mix.wav", "out.mp4")
+    assert enc[enc.index("-i") + 1] == "pipe:0" and "mix.wav" in enc and enc[-1] == "out.mp4"
+    assert enc.count("-i") == 2                               # only the frame pipe and the mixed wav
 
 
 @needs_ffmpeg
