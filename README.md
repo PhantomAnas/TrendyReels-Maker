@@ -1,5 +1,7 @@
 # TrendyReels Maker
 
+**Free, open-source Reels / Shorts / TikTok video generator (Python, PySide6, FFmpeg): turn any story text into a vertical video with AI text-to-speech narration (Edge TTS, free), word-synced animated captions, a title card and your own background footage. A faceless-video maker that runs on your PC, no subscription.**
+
 Paste a story, pick a voice, a caption look and some background footage, press **Render**: out comes a vertical short with an AI narration, word-synced pop captions and a title card, ready for Reels, Shorts and TikTok. One story at a time, or a whole queue from a text file.
 
 ![TrendyReels Maker window](docs/screenshot.png)
