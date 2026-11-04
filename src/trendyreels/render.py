@@ -12,6 +12,7 @@ import os
 import random
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -375,8 +376,11 @@ def _kill(proc: subprocess.Popen) -> None:
 
 
 def _remove(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
+    """Delete a partial output; on Windows a just-killed ffmpeg may hold it for a moment."""
+    for _ in range(20):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        except OSError:
+            time.sleep(0.1)
